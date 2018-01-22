@@ -14,7 +14,6 @@ import (
 	"net/url"
 	"strconv"
 
-	// "github.com/codegangsta/negroni"
 	"github.com/goincremental/negroni-sessions"
 	"github.com/goincremental/negroni-sessions/cookiestore"
 	gmux "github.com/gorilla/mux"
@@ -31,7 +30,8 @@ type Book struct {
 }
 
 type Page struct {
-	Books []Book
+	Books  []Book
+	Filter string
 }
 
 type SearchResult struct {
@@ -61,15 +61,29 @@ func verifyDatabase(w http.ResponseWriter, r *http.Request, next http.HandlerFun
 	next(w, r)
 }
 
-func getBookCollection(books *[]Book, sortCol string, w http.ResponseWriter) bool {
-	if sortCol != "title" && sortCol != "author" && sortCol != "classification" {
+func getBookCollection(books *[]Book, sortCol string, filterByClass string, w http.ResponseWriter) bool {
+	if sortCol == "" {
 		sortCol = "pk"
 	}
-	if _, err := dbmap.Select(books, "select * from books order by "+sortCol); err != nil {
+	var where string
+	if filterByClass == "fiction" {
+		where = " where classification between '800' and '900'"
+	} else if filterByClass == "nonfiction" {
+		where = " where classification not between '800' and '900'"
+	}
+	if _, err := dbmap.Select(books, "select * from books"+where+" order by "+sortCol); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return false
 	}
 	return true
+}
+
+func getStringFromSession(r *http.Request, key string) string {
+	var strVal string
+	if val := sessions.GetSession(r).Get(key); val != nil {
+		strVal = val.(string)
+	}
+	return strVal
 }
 
 func main() {
@@ -77,9 +91,41 @@ func main() {
 
 	mux := gmux.NewRouter()
 
+	mux.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
+		if r.FormValue("register") != "" || r.FormValue("login") != "" {
+			http.Redirect(w, r, "/", http.StatusFound)
+			return
+		}
+
+		template, err := ace.Load("templates/login", "", nil)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if err = template.Execute(w, nil); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	})
+
 	mux.HandleFunc("/books", func(w http.ResponseWriter, r *http.Request) {
 		var b []Book
-		if !getBookCollection(&b, r.FormValue("sortBy"), w) {
+		if !getBookCollection(&b, getStringFromSession(r, "SortBy"), r.FormValue("filter"), w) {
+			return
+		}
+
+		sessions.GetSession(r).Set("Filter", r.FormValue("filter"))
+
+		if err := json.NewEncoder(w).Encode(b); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}).Methods("GET").Queries("filter", "{filter:all|fiction|nonfiction}")
+
+	mux.HandleFunc("/books", func(w http.ResponseWriter, r *http.Request) {
+		var b []Book
+		if !getBookCollection(&b, r.FormValue("sortBy"), getStringFromSession(r, "Filter"), w) {
 			return
 		}
 
@@ -89,7 +135,7 @@ func main() {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-	}).Methods("GET")
+	}).Methods("GET").Queries("sortBy", "{sortBy:title|author|classification}")
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		template, err := ace.Load("templates/index", "", nil)
@@ -98,12 +144,8 @@ func main() {
 			return
 		}
 
-		var sortColumn string
-		if sortBy := sessions.GetSession(r).Get("SortBy"); sortBy != nil {
-			sortColumn = sortBy.(string)
-		}
-		p := Page{Books: []Book{}}
-		if !getBookCollection(&p.Books, sortColumn, w) {
+		p := Page{Books: []Book{}, Filter: getStringFromSession(r, "Filter")}
+		if !getBookCollection(&p.Books, getStringFromSession(r, "SortBy"), getStringFromSession(r, "Filter"), w) {
 			return
 		}
 
