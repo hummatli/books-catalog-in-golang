@@ -15,9 +15,15 @@ import (
   "github.com/yosssi/ace"
 )
 
+type Book struct {
+  PK int
+  Title string
+  Author string
+  Classification string
+}
+
 type Page struct {
-  Name string
-  DBStatus bool
+  Books []Book
 }
 
 type SearchResult struct {
@@ -46,13 +52,16 @@ func main() {
     template, err := ace.Load("templates/index", "", nil)
     if err != nil {
       http.Error(w, err.Error(), http.StatusInternalServerError)
+      return
     }
 
-    p := Page{Name: "Gopher"}
-    if name := r.FormValue("name"); name != "" {
-      p.Name = name
+    p := Page{Books: []Book{}}
+    rows, _ := db.Query("select pk,title,author,classification from books")
+    for rows.Next() {
+      var b Book
+      rows.Scan(&b.PK, &b.Title, &b.Author, &b.Classification)
+      p.Books = append(p.Books, b)
     }
-    p.DBStatus = db.Ping() == nil
 
     if err = template.Execute(w, p); err != nil {
       http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -65,6 +74,7 @@ func main() {
 
     if results, err = search(r.FormValue("search")); err != nil {
       http.Error(w, err.Error(), http.StatusInternalServerError)
+      return
     }
 
     encoder := json.NewEncoder(w)
@@ -79,14 +89,35 @@ func main() {
 
     if book, err = find(r.FormValue("id")); err != nil {
       http.Error(w, err.Error(), http.StatusInternalServerError)
+      return
     }
 
-    _, err = db.Exec("insert into books (pk, title, author, id, classification) values (?, ?, ?, ?, ?)",
+    result, err := db.Exec("insert into books (pk, title, author, id, classification) values (?, ?, ?, ?, ?)",
                       nil, book.BookData.Title, book.BookData.Author, book.BookData.ID, book.Classification.MostPopular)
 
     if err != nil {
       http.Error(w, err.Error(), http.StatusInternalServerError)
+      return
     }
+
+    pk, _ := result.LastInsertId()
+    b := Book{
+      PK: int(pk),
+      Title: book.BookData.Title,
+      Author: book.BookData.Author,
+      Classification: book.Classification.MostPopular,
+    }
+    if err := json.NewEncoder(w).Encode(b); err != nil {
+      http.Error(w, err.Error(), http.StatusInternalServerError)
+    }
+  })
+
+  mux.HandleFunc("/books/delete", func (w http.ResponseWriter, r *http.Request) {
+    if _, err := db.Exec("delete from books where pk = ?", r.FormValue("pk")); err != nil {
+      http.Error(w, err.Error(), http.StatusInternalServerError)
+      return
+    }
+    w.WriteHeader(http.StatusOK)
   })
 
   n := negroni.Classic()
