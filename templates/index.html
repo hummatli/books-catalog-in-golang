@@ -1,17 +1,11 @@
-<!DOCTYPE html>
 <html>
-<head>
-    <meta charset="utf-8" />
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <title>Page Title</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link rel="stylesheet" type="text/css" media="screen" href="main.css" />
-    <script src="main.js"></script>
-</head>
+
+<head></head>
+
 <body>
     <form id="search-form" onsubmit="return false">
-        <input name="search">
-        <input type="submit" value="Search" onclick="submitSearch()">
+        <input name="search" />
+        <input type="submit" value="Search" onclick="submitSearch()" />
     </form>
 
     <table width="100%">
@@ -23,17 +17,17 @@
                 <th width="20%">ID</th>
             </tr>
         </thead>
-        <tbody id="search-results"></tbody>
+        <tbody id="search-results">
+        </tbody>
     </table>
 
-    <script src="https://code.jquery.com/jquery-2.2.4.min.js" integrity="sha256-BbhdlvQf/xTY9gja0Dq3HiwQF8LaCRTXxZKRutelT44="
-        crossorigin="anonymous"></script>
+    <script type="text/javascript" src="http://code.jquery.com/jquery-2.1.4.min.js"></script>
     <script type="text/javascript">
         function submitSearch() {
             $.ajax({
                 url: "/search",
                 method: "POST",
-                data: $("search-form").serialize(),
+                data: $("#search-form").serialize(),
                 success: function (rawData) {
                     var parsed = JSON.parse(rawData);
                     if (!parsed) return;
@@ -45,11 +39,12 @@
                         var row = $("<tr><td>" + result.Title + "</td><td>" + result.Author + "</td><td>" + result.Year + "</td><td>" + result.ID + "</td></tr>");
                         searchResults.append(row);
                     });
-                },
+                }
             });
-            
+
             return false;
         }
     </script>
 </body>
+
 </html>
