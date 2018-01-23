@@ -5,18 +5,20 @@ import (
 
 	"database/sql"
 
+	sessions "github.com/goincremental/negroni-sessions"
+	_ "github.com/lib/pq"
 	_ "github.com/mattn/go-sqlite3"
-	"gopkg.in/gorp.v1"
+	gorp "gopkg.in/gorp.v1"
 
 	"encoding/json"
 	"encoding/xml"
 	"io/ioutil"
 	"net/url"
+	"os"
 	"strconv"
 
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/goincremental/negroni-sessions"
 	"github.com/goincremental/negroni-sessions/cookiestore"
 	gmux "github.com/gorilla/mux"
 	"github.com/urfave/negroni"
@@ -54,9 +56,13 @@ var db *sql.DB
 var dbmap *gorp.DbMap
 
 func initDb() {
-	db, _ = sql.Open("sqlite3", "dev.db")
-
-	dbmap = &gorp.DbMap{Db: db, Dialect: gorp.SqliteDialect{}}
+	if os.Getenv("ENV") != "production" {
+		db, _ = sql.Open("sqlite3", "dev.db")
+		dbmap = &gorp.DbMap{Db: db, Dialect: gorp.SqliteDialect{}}
+	} else {
+		db, _ = sql.Open("postgres", os.Getenv("DATABASE_URL"))
+		dbmap = &gorp.DbMap{Db: db, Dialect: gorp.PostgresDialect{}}
+	}
 
 	dbmap.AddTableWithName(Book{}, "books").SetKeys(true, "pk")
 	dbmap.AddTableWithName(User{}, "users").SetKeys(false, "username")
@@ -75,7 +81,7 @@ func getBookCollection(books *[]Book, sortCol, filterByClass, username string, w
 	if sortCol == "" {
 		sortCol = "pk"
 	}
-	where := " where user=?"
+	where := " where \"user\"=" + dbmap.Dialect.BindVar(0)
 	if filterByClass == "fiction" {
 		where += " and classification between '800' and '900'"
 	} else if filterByClass == "nonfiction" {
@@ -262,8 +268,8 @@ func main() {
 	mux.HandleFunc("/books/{pk}", func(w http.ResponseWriter, r *http.Request) {
 		pk, _ := strconv.ParseInt(gmux.Vars(r)["pk"], 10, 64)
 		var b Book
-		if err := dbmap.SelectOne(&b, "select * from books where pk=? and user=?",
-			pk, getStringFromSession(r, "User")); err != nil {
+		q := "select * from books where pk=" + dbmap.Dialect.BindVar(0) + " and \"user\"=" + dbmap.Dialect.BindVar(1)
+		if err := dbmap.SelectOne(&b, q, pk, getStringFromSession(r, "User")); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 		}
 		if _, err := dbmap.Delete(&b); err != nil {
@@ -278,7 +284,13 @@ func main() {
 	n.Use(negroni.HandlerFunc(verifyDatabase))
 	n.Use(negroni.HandlerFunc(verifyUser))
 	n.UseHandler(mux)
-	n.Run(":8080")
+
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	n.Run(":" + port)
 }
 
 type ClassifySearchResponse struct {
