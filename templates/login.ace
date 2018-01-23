@@ -14,7 +14,7 @@ html
         margin-top: 1em;
       }
   body
-    form#login-form
+    form#login-form method="POST"
       div
         label Username
         input type="email" name="username" required=
